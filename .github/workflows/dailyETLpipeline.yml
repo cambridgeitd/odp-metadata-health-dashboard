@@ -1,0 +1,104 @@
+name: Daily ETL Pipeline
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+    inputs:
+      ingest_only:
+        description: "Run ingest step only"
+        required: false
+        default: "false"
+      evaluate_only:
+        description: "Run evaluate step only"
+        required: false
+        default: "false"
+      dry_run:
+        description: "Preview without saving"
+        required: false
+        default: "false"
+
+# Added this to allow the Action to write back to your repo
+permissions:
+  contents: write
+
+jobs:
+  run-etl:
+    name: Execute ETL Pipeline
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ETL/requirements.txt
+
+      - name: Create data directory
+        run: |
+          mkdir -p ETL/data
+
+      - name: Configure environment
+        run: |
+          echo "BASE_DIR=${{ github.workspace }}/ETL" >> $GITHUB_ENV
+
+      - name: Run ETL Pipeline
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          HUGGINGFACE_TOKEN: ${{ secrets.HUGGINGFACE_TOKEN }}
+        run: |
+          cd ETL
+          CMD="python pipeline.py"
+          if [ "${{ github.event.inputs.ingest_only }}" == "true" ]; then
+            CMD="$CMD --ingest-only"
+          elif [ "${{ github.event.inputs.evaluate_only }}" == "true" ]; then
+            CMD="$CMD --evaluate-only"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" == "true" ]; then
+            CMD="$CMD --dry-run"
+          fi
+          echo "Running: $CMD"
+          $CMD
+
+      - name: Upload database artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: etl-database-${{ github.run_number }}
+          path: ETL/data/cambridge_metadata.db
+          retention-days: 30
+
+      # FIXED: Corrected indentation and simplified Git logic
+      - name: Commit database to repository
+        if: success() && github.event.inputs.dry_run != 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add ETL/data/cambridge_metadata.db
+          git commit -m "Update database: Run ${{ github.run_number }}" || exit 0
+          git push
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: etl-logs-failed-${{ github.run_number }}
+          path: |
+            ETL/**/*.log
+            ETL/data/*.db
+          retention-days: 7
+
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "::error::ETL Pipeline failed. Check the logs for details."
