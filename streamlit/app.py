@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import json
 import os
+import sqlite3
 from datetime import datetime, timezone
 import plotly.express as px
 import plotly.graph_objects as go
-from datasets import load_dataset
 from typing import Optional
 
 st.set_page_config(
@@ -164,22 +164,34 @@ def _calculate_derived_fields(df: pd.DataFrame) -> pd.DataFrame:
 @st.cache_data(ttl=3600)
 def load_data() -> pd.DataFrame:
     """
-    Load and transform data from HuggingFace dataset.
+    Load and transform data from local SQLite database.
 
     Returns:
         Transformed DataFrame matching the expected schema for the app
     """
     try:
-        # Step 1: Load Parquet from HuggingFace (public dataset)
-        dataset = load_dataset(
-            "spark-dd4g/odp-metadata-health",
-            split="train",
-            cache_dir=None
-        )
-        df = dataset.to_pandas()
+        db_path = os.path.join(os.path.dirname(__file__), '..', 'ETL', 'data', 'cambridge_metadata.db')
+        db_path = os.path.normpath(db_path)
 
-        # Debug: Print available columns
-        print(f"Loaded {len(df)} rows")
+        if not os.path.exists(db_path):
+            st.error(f"Database not found at: {db_path}")
+            st.info("Run the ETL pipeline first to populate the database.")
+            return pd.DataFrame()
+
+        conn = sqlite3.connect(db_path)
+        query = """
+            SELECT d.*, e.evaluated_at, e.description_score, e.description_feedback,
+                   e.description_suggestion, e.tag_score, e.tag_feedback, e.tag_suggestion,
+                   e.description_exists, e.tags_count_score, e.license_exists,
+                   e.department_exists, e.category_exists, e.days_overdue,
+                   e.freshness_score, e.overall_health_score, e.overall_health_label
+            FROM ODP_datasets d
+            LEFT JOIN evaluations e ON d.dataset_id = e.dataset_id
+        """
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+
+        print(f"Loaded {len(df)} rows from local database")
         print(f"Available columns: {df.columns.tolist()}")
 
         # Step 2: Column Renames
@@ -205,12 +217,7 @@ def load_data() -> pd.DataFrame:
         return df
 
     except Exception as e:
-        st.error(f"Failed to load data from HuggingFace: {e}")
-        st.info("Dataset URL: https://huggingface.co/datasets/spark-dd4g/odp-metadata-health")
-
-        # Check if it's an authentication error
-        if "401" in str(e) or "403" in str(e) or "unauthorized" in str(e).lower():
-            st.warning("⚠️ The dataset appears to be private. Please make it public at the dataset settings page.")
+        st.error(f"Failed to load data from database: {e}")
 
         import traceback
         with st.expander("Show full error details"):
@@ -548,7 +555,7 @@ with tab5:
     export_df = filtered[available_cols].sort_values("health_score")
 
     # Add human approval status from session state
-    if st.session_state.human_approvals:
+    if st.session_state.get('human_approvals'):
         # Convert session state to DataFrame
         approvals_data = []
         for dataset_id, approval in st.session_state.human_approvals.items():

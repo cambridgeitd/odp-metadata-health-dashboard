@@ -28,6 +28,8 @@ import json
 import os
 import argparse
 import logging
+import re
+import time
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
@@ -588,7 +590,7 @@ STRICT RULES:
 • If the available metadata is insufficient to write a meaningful description,
   return exactly: "INSUFFICIENT_DATA"
 
-Write a clear, factual 2-3 sentence description that:
+Write a clear, factual single-sentence description (max 25 words) that:
 • Clearly explains what data this dataset contains
 • Mentions key fields or metrics (if known from columns/name)
 • Describes potential use cases or purpose (if inferrable from category/name)
@@ -650,6 +652,7 @@ REQUIRED JSON RESPONSE FORMAT
 
 CRITICAL REQUIREMENTS:
 • Respond ONLY with the JSON object, no preamble or explanation
+• Do NOT wrap output in markdown code fences
 • Ensure all 6 fields are present
 • Use double quotes for strings
 • tag_suggestions must be an array of 3-5 strings
@@ -660,7 +663,23 @@ CRITICAL REQUIREMENTS:
     return prompt
 
 
-def enrich_with_llm(dataset: Dict[str, Any]) -> Dict[str, Any]:
+def build_evaluation_prompt_json_compact(dataset: Dict[str, Any]) -> str:
+    """
+    Build a compact fallback prompt to reduce response size and avoid truncation.
+    """
+    base_prompt = build_evaluation_prompt_json(dataset)
+    return base_prompt + """
+
+ADDITIONAL OUTPUT CONSTRAINTS:
+• Keep the entire response under 900 characters
+• description_suggestion must be <= 25 words
+• description_feedback must be <= 5 words
+• tag_feedback must be <= 12 words
+• tag_suggestions must contain exactly 3 tags
+"""
+
+
+def enrich_with_llm(dataset: Dict[str, Any], llm_client=None) -> Dict[str, Any]:
     """
     Perform LLM-based metadata enrichment using single JSON-structured API call.
 
@@ -674,6 +693,7 @@ def enrich_with_llm(dataset: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         dataset: Dataset dictionary from ODP_datasets table
+        llm_client: Optional pre-initialized LLM client (avoids re-creation per call)
 
     Returns:
         Dictionary with all LLM enrichment results matching README schema:
@@ -692,7 +712,8 @@ def enrich_with_llm(dataset: Dict[str, Any]) -> Dict[str, Any]:
         sys.path.append(os.path.join(os.path.dirname(__file__), 'setup'))
         from config import get_llm_client
 
-        llm_client = get_llm_client()
+        if llm_client is None:
+            llm_client = get_llm_client()
 
         # Build consolidated JSON prompt
         prompt = build_evaluation_prompt_json(dataset)
@@ -701,13 +722,46 @@ def enrich_with_llm(dataset: Dict[str, Any]) -> Dict[str, Any]:
         logger.debug(f"Calling LLM for dataset {dataset.get('dataset_id')}")
         response = llm_client.call_llm(prompt)
 
+        def parse_llm_json_response(response_text: str) -> Dict[str, Any]:
+            if not response_text or not response_text.strip():
+                raise ValueError("LLM returned an empty response")
+
+            cleaned_response = response_text.strip()
+
+            try:
+                return json.loads(cleaned_response)
+            except json.JSONDecodeError:
+                pass
+
+            fenced_match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", cleaned_response, re.DOTALL)
+            if fenced_match:
+                return json.loads(fenced_match.group(1))
+
+            first_brace = cleaned_response.find("{")
+            last_brace = cleaned_response.rfind("}")
+            if first_brace != -1 and last_brace != -1 and last_brace > first_brace:
+                return json.loads(cleaned_response[first_brace:last_brace + 1])
+
+            raise ValueError("LLM response did not contain a parseable JSON object")
+
         # Parse JSON response
         try:
-            result = json.loads(response)
-        except json.JSONDecodeError as e:
+            result = parse_llm_json_response(response)
+        except (json.JSONDecodeError, ValueError) as e:
             logger.error(f"Failed to parse LLM JSON response: {e}")
-            logger.debug(f"Raw response: {response[:500]}")
-            raise ValueError(f"LLM did not return valid JSON: {e}")
+            logger.warning(f"Raw LLM response preview: {response[:1000]}")
+
+            # Retry once with a compact prompt to avoid truncated responses
+            logger.info("Retrying LLM call with compact JSON prompt")
+            compact_prompt = build_evaluation_prompt_json_compact(dataset)
+            retry_response = llm_client.call_llm(compact_prompt)
+
+            try:
+                result = parse_llm_json_response(retry_response)
+            except (json.JSONDecodeError, ValueError) as retry_error:
+                logger.error(f"Compact retry also failed JSON parsing: {retry_error}")
+                logger.warning(f"Compact retry response preview: {retry_response[:1000]}")
+                raise ValueError(f"LLM did not return valid JSON after retry: {retry_error}")
 
         # Validate required fields
         required_fields = [
@@ -777,7 +831,7 @@ def enrich_with_llm(dataset: Dict[str, Any]) -> Dict[str, Any]:
 # RESULT AGGREGATION & STORAGE
 # ────────────────────────────────────────────────────────────
 
-def evaluate_dataset(dataset: Dict[str, Any]) -> Dict[str, Any]:
+def evaluate_dataset(dataset: Dict[str, Any], llm_client=None) -> Dict[str, Any]:
     """
     Perform complete evaluation of a single dataset.
 
@@ -788,6 +842,7 @@ def evaluate_dataset(dataset: Dict[str, Any]) -> Dict[str, Any]:
 
     Args:
         dataset: Dataset dictionary from ODP_datasets table
+        llm_client: Optional pre-initialized LLM client
 
     Returns:
         Complete evaluation result dictionary matching README schema,
@@ -803,7 +858,7 @@ def evaluate_dataset(dataset: Dict[str, Any]) -> Dict[str, Any]:
     # STEP 2: LLM enrichment (llm_enrich.py logic)
     # IMPORTANT: This is atomic - if LLM fails, the entire evaluation is aborted
     logger.debug(f"Running LLM enrichment for {dataset_id}...")
-    llm_scores = enrich_with_llm(dataset)
+    llm_scores = enrich_with_llm(dataset, llm_client=llm_client)
 
     # Check if LLM enrichment actually succeeded (not all NULL values)
     llm_succeeded = (
@@ -927,6 +982,12 @@ def main():
     # Step 2: Evaluate each dataset
     logger.info(f"Step 2: Evaluating {len(datasets)} datasets...")
 
+    # Create LLM client once for all evaluations
+    import sys
+    sys.path.append(os.path.join(os.path.dirname(__file__), 'setup'))
+    from config import get_llm_client
+    llm_client = get_llm_client()
+
     results_summary = {
         'healthy': 0,
         'warning': 0,
@@ -940,10 +1001,13 @@ def main():
             logger.info(f"[{idx}/{len(datasets)}] {title}")
 
             # Evaluate dataset
-            evaluation_result = evaluate_dataset(dataset)
+            evaluation_result = evaluate_dataset(dataset, llm_client=llm_client)
 
             # Save to database
             save_evaluation(dataset['dataset_id'], evaluation_result)
+
+            # Rate-limit delay to avoid 429s (especially for GPT-4 with low TPM limits)
+            time.sleep(2)
 
             # Update summary (map health labels to summary categories)
             label = evaluation_result['overall_health_label']  # 'good', 'fair', 'poor', or 'critical'

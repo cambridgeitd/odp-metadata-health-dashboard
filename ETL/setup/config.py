@@ -18,8 +18,6 @@ import time
 from typing import Dict, Any
 from dotenv import load_dotenv
 import logging
-from google import genai
-from huggingface_hub import InferenceClient
 
 logger = logging.getLogger(__name__)
 
@@ -131,11 +129,47 @@ class OpenAIClient(BaseLLMClient):
         #
         # PLACEHOLDER IMPLEMENTATION (stores parameters for now):
 
-        self.api_key = api_key
+        from openai import OpenAI
+        self.client = OpenAI(api_key=api_key, max_retries=0)
         self.model = model
         self.temperature = temperature
         self.max_tokens = max_tokens
         logger.info(f"OpenAI client initialized (model: {model})")
+
+    def call_llm(self, prompt: str, retries: int = 6) -> str:
+        """
+        Call OpenAI API with retry logic and exponential backoff.
+
+        Args:
+            prompt: The prompt to send to OpenAI
+            retries: Number of retry attempts on failure
+
+        Returns:
+            Response text from OpenAI
+
+        Raises:
+            Exception: If all retries are exhausted
+        """
+        for attempt in range(retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are a metadata quality evaluator. Respond only in JSON."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=self.temperature,
+                    max_tokens=self.max_tokens,
+                )
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                wait = 20 * (2 ** attempt)  # 20s, 40s, 80s, 160s, 320s, 640s
+                logger.warning(f"OpenAI API error (attempt {attempt+1}/{retries}): {e}")
+                if attempt < retries - 1:
+                    logger.info(f"Retrying in {wait} seconds...")
+                    time.sleep(wait)
+                else:
+                    raise
 
     def evaluate(self, prompt: str) -> Dict[str, Any]:
         """
@@ -300,6 +334,8 @@ class GeminiClient(BaseLLMClient):
             temperature: Sampling temperature (0.0-1.0)
             max_tokens: Maximum tokens to generate
         """
+        from google import genai
+        self._genai = genai
         self.client = genai.Client(api_key=api_key)
         self.model = model
         self.temperature = temperature
@@ -325,7 +361,7 @@ class GeminiClient(BaseLLMClient):
                 response = self.client.models.generate_content(
                     model=self.model,
                     contents=prompt,
-                    config=genai.types.GenerateContentConfig(
+                    config=self._genai.types.GenerateContentConfig(
                         temperature=self.temperature,
                         max_output_tokens=self.max_tokens,
                     )
@@ -392,6 +428,7 @@ class HuggingFaceClient(BaseLLMClient):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.delay_seconds = delay_seconds
+        from huggingface_hub import InferenceClient
         self.client = InferenceClient(token=api_key)
         logger.info(f"HuggingFace client initialized (model: {model})")
 
