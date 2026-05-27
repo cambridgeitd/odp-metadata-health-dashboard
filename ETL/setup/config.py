@@ -28,6 +28,32 @@ project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 dotenv_path = os.path.join(project_root, '.env')
 load_dotenv(dotenv_path)
 
+
+def _resolve_llm_provider() -> str:
+    """
+    Resolve the active LLM provider from environment configuration.
+
+    If LLM_PROVIDER is unset, fall back to the first configured provider key.
+    This keeps local .env usage working while allowing CI environments to
+    inject secrets directly without requiring a checked-in .env file.
+    """
+    configured_provider = os.getenv('LLM_PROVIDER')
+    if configured_provider:
+        return configured_provider
+
+    provider_keys = (
+        ('openai', os.getenv('OPENAI_API_KEY')),
+        ('anthropic', os.getenv('ANTHROPIC_API_KEY')),
+        ('gemini', os.getenv('GEMINI_API_KEY')),
+        ('huggingface', os.getenv('HF_TOKEN')),
+    )
+
+    for provider_name, api_key in provider_keys:
+        if api_key:
+            return provider_name
+
+    return 'gemini'
+
 # ────────────────────────────────────────────────────────────
 # CONFIGURATION GETTERS
 # ────────────────────────────────────────────────────────────
@@ -45,7 +71,7 @@ def get_config() -> Dict[str, Any]:
         - LLM parameters (temperature, max_tokens)
     """
     return {
-        'llm_provider': os.getenv('LLM_PROVIDER', 'gemini'),
+        'llm_provider': _resolve_llm_provider(),
         'gemini_api_key': os.getenv('GEMINI_API_KEY'),
         'openai_api_key': os.getenv('OPENAI_API_KEY'),
         'anthropic_api_key': os.getenv('ANTHROPIC_API_KEY'),
