@@ -16,5 +16,8 @@ google-genai>=0.2.0        # Google Gemini API client (new SDK)
 # Hugging Face inference client (used for metadata evaluations)
 huggingface-hub>=0.15.0
 
+# Parquet export support
+pyarrow>=14.0.0            # Required for pandas .to_parquet() / read_parquet()
+
 # Database (built-in with Python, no installation needed)
 # sqlite3 - included in Python standard library
