@@ -1,0 +1,60 @@
+name: Deploy Streamlit to Hugging Face Space
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - streamlit/**
+      - .github/workflows/deploy_hf_space.yml
+  workflow_run:
+    workflows:
+      - Daily ETL Pipeline
+    types:
+      - completed
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-hf-space
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to Hugging Face Space
+    runs-on: ubuntu-latest
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    env:
+      HF_SPACE_REPO: ${{ vars.HF_SPACE_REPO || 'alixepstein/COCmetadatahealth' }}
+      HUGGING_FACE_TOKEN: ${{ secrets.HF_TOKEN }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate deployment configuration
+        run: |
+          if [ -z "$HUGGING_FACE_TOKEN" ]; then
+            echo "::error::Missing HUGGING_FACE_TOKEN repository secret."
+            exit 1
+          fi
+
+          if [ -z "$HF_SPACE_REPO" ]; then
+            echo "::error::Missing HF_SPACE_REPO repository variable (example: spark-dd4g/cambridge-health-dashboard)."
+            exit 1
+          fi
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Push streamlit app subtree to Space
+        run: |
+          git subtree split --prefix streamlit -b hf-space-deploy
+          git push --force "https://oauth2:${HUGGING_FACE_TOKEN}@huggingface.co/spaces/${HF_SPACE_REPO}" hf-space-deploy:main
+          git branch -D hf-space-deploy
