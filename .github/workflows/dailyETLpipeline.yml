@@ -84,7 +84,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add ETL/data/cambridge_metadata.db
+          git add -f ETL/data/cambridge_metadata.db
           git commit -m "Update database: Run ${{ github.run_number }}" || exit 0
           git push
 
