@@ -28,6 +28,7 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     env:
       HF_SPACE_REPO: ${{ vars.HF_SPACE_REPO || 'alixepstein/COCmetadatahealth' }}
+      HF_USERNAME: ${{ vars.HF_USERNAME || 'alixepstein' }}
       HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
 
     steps:
@@ -48,6 +49,11 @@ jobs:
             exit 1
           fi
 
+          if [ -z "$HF_USERNAME" ]; then
+            echo "::error::Missing HF_USERNAME repository variable (Hugging Face account username for token auth)."
+            exit 1
+          fi
+
       - name: Configure Git identity
         run: |
           git config user.name "github-actions[bot]"
@@ -56,5 +62,5 @@ jobs:
       - name: Push streamlit app subtree to Space
         run: |
           git subtree split --prefix streamlit -b hf-space-deploy
-          git push --force "https://oauth2:${HUGGING_FACE_TOKEN}@huggingface.co/spaces/${HF_SPACE_REPO}" hf-space-deploy:main
+          git push --force "https://${HF_USERNAME}:${HUGGING_FACE_TOKEN}@huggingface.co/spaces/${HF_SPACE_REPO}" hf-space-deploy:main
           git branch -D hf-space-deploy
