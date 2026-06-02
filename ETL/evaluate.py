@@ -267,14 +267,34 @@ FREQUENCY_THRESHOLDS = {
     "biweekly": 14,
     "monthly": 30,
     "quarterly": 90,
+    "semiannually": 182,
+    "semi-annually": 182,
+    "semiannual": 182,
     "annually": 365,
     "yearly": 365,
     "annual": 365,
     "as needed": None,
     "historical": None,
+    "historical data": None,
     "not planned": None,
     "never": None,
 }
+
+
+def normalize_update_frequency(raw_frequency: Any) -> str:
+    """Normalize source update-frequency labels to evaluator keys."""
+    freq = (raw_frequency or "").strip().lower()
+    if not freq:
+        return ""
+
+    if "historical" in freq:
+        return "historical"
+    if "as needed" in freq or "as-needed" in freq:
+        return "as needed"
+    if freq in {"semi annually", "semi-annually", "semiannual", "semiannually"}:
+        return "semiannually"
+
+    return freq
 
 # Health scoring weights (from score_and_flag.py)
 HEALTH_WEIGHTS = {
@@ -301,7 +321,7 @@ def compute_staleness(dataset: Dict[str, Any]) -> Dict[str, Any]:
         - days_overdue (int): Number of days overdue (0 if not overdue, -1 if error)
         - freshness_score (float): 0-100 score (100=fresh, 50=1-2x late, 0=>2x late)
     """
-    freq = (dataset.get("update_frequency") or "").strip().lower()
+    freq = normalize_update_frequency(dataset.get("update_frequency"))
     threshold_days = FREQUENCY_THRESHOLDS.get(freq, 730)  # Default: 2 years
 
     if threshold_days is None:

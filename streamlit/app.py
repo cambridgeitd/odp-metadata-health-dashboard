@@ -29,6 +29,22 @@ st.markdown("""
 BAND_COLORS = {"Critical": "#e74c3c", "Poor": "#e67e22", "Fair": "#f1c40f", "Good": "#2ecc71"}
 BAND_EMOJI  = {"Critical": "●", "Poor": "●", "Fair": "●", "Good": "●"}
 HF_DATASET_REPO = os.getenv("HF_DATASET_REPO", "alixepstein/odp-metadata-health")
+HF_FALLBACK_DATASET_REPOS = tuple(
+    repo.strip() for repo in os.getenv(
+        "HF_FALLBACK_DATASET_REPOS",
+        "spark-dd4g/odp-metadata-health"
+    ).split(",") if repo.strip()
+)
+
+
+def _dataset_repo_candidates() -> list[str]:
+    """Return primary + fallback dataset repos, preserving order and uniqueness."""
+    candidates = [HF_DATASET_REPO, *HF_FALLBACK_DATASET_REPOS]
+    deduped = []
+    for repo in candidates:
+        if repo not in deduped:
+            deduped.append(repo)
+    return deduped
 
 
 # ── Data Transformation Helper Functions ──────────────────────────────────────
@@ -191,9 +207,25 @@ def load_data() -> pd.DataFrame:
             print(f"Loaded {len(df)} rows from local database")
         else:
             # Spaces deployment uses the published dataset instead of local SQLite files.
-            hf_dataset = load_dataset(HF_DATASET_REPO, split="train")
-            df = hf_dataset.to_pandas()
-            print(f"Loaded {len(df)} rows from Hugging Face dataset: {HF_DATASET_REPO}")
+            repo_errors = []
+            df = None
+            for repo in _dataset_repo_candidates():
+                try:
+                    hf_dataset = load_dataset(repo, split="train")
+                    candidate_df = hf_dataset.to_pandas()
+                    if candidate_df.empty:
+                        raise ValueError("dataset is empty")
+                    df = candidate_df
+                    print(f"Loaded {len(df)} rows from Hugging Face dataset: {repo}")
+                    break
+                except Exception as exc:
+                    repo_errors.append(f"{repo}: {exc}")
+
+            if df is None:
+                raise RuntimeError(
+                    "Failed to load any published dataset snapshot. Tried: "
+                    + " | ".join(repo_errors)
+                )
 
         print(f"Available columns: {df.columns.tolist()}")
 

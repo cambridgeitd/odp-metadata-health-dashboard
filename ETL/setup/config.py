@@ -54,6 +54,12 @@ def _resolve_llm_provider() -> str:
 
     return 'gemini'
 
+
+def _is_openai_quota_error(error: Exception) -> bool:
+    """Return True when OpenAI rejected the request due to exhausted quota."""
+    error_text = str(error).lower()
+    return 'insufficient_quota' in error_text or 'exceeded your current quota' in error_text
+
 # ────────────────────────────────────────────────────────────
 # CONFIGURATION GETTERS
 # ────────────────────────────────────────────────────────────
@@ -191,6 +197,12 @@ class OpenAIClient(BaseLLMClient):
             except Exception as e:
                 wait = 20 * (2 ** attempt)  # 20s, 40s, 80s, 160s, 320s, 640s
                 logger.warning(f"OpenAI API error (attempt {attempt+1}/{retries}): {e}")
+                if _is_openai_quota_error(e):
+                    logger.error(
+                        "OpenAI quota exceeded; skipping retries so the app can fall back "
+                        "to previously published dataset snapshots."
+                    )
+                    raise
                 if attempt < retries - 1:
                     logger.info(f"Retrying in {wait} seconds...")
                     time.sleep(wait)
