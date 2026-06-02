@@ -10,7 +10,7 @@ app_file: app.py
 pinned: false
 license: apache-2.0
 datasets:
-  - spark-dd4g/odp-metadata-health
+  - alixepstein/odp-metadata-health
 tags:
   - metadata
   - data-quality
@@ -33,7 +33,7 @@ An interactive dashboard for monitoring the health and quality of metadata in th
 
 ## Data Source
 
-This dashboard loads data from the [spark-dd4g/odp-metadata-health](https://huggingface.co/datasets/spark-dd4g/odp-metadata-health) dataset, which is updated daily by an automated pipeline that:
+This dashboard loads data from the [alixepstein/odp-metadata-health](https://huggingface.co/datasets/alixepstein/odp-metadata-health) dataset, which is updated daily by an automated pipeline that:
 
 1. Fetches dataset metadata from the Cambridge Open Data Portal
 2. Evaluates metadata completeness and quality

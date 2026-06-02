@@ -28,6 +28,7 @@ st.markdown("""
 
 BAND_COLORS = {"Critical": "#e74c3c", "Poor": "#e67e22", "Fair": "#f1c40f", "Good": "#2ecc71"}
 BAND_EMOJI  = {"Critical": "●", "Poor": "●", "Fair": "●", "Good": "●"}
+HF_DATASET_REPO = os.getenv("HF_DATASET_REPO", "alixepstein/odp-metadata-health")
 
 
 # ── Data Transformation Helper Functions ──────────────────────────────────────
@@ -190,9 +191,9 @@ def load_data() -> pd.DataFrame:
             print(f"Loaded {len(df)} rows from local database")
         else:
             # Spaces deployment uses the published dataset instead of local SQLite files.
-            hf_dataset = load_dataset("spark-dd4g/odp-metadata-health", split="train")
+            hf_dataset = load_dataset(HF_DATASET_REPO, split="train")
             df = hf_dataset.to_pandas()
-            print(f"Loaded {len(df)} rows from Hugging Face dataset")
+            print(f"Loaded {len(df)} rows from Hugging Face dataset: {HF_DATASET_REPO}")
 
         print(f"Available columns: {df.columns.tolist()}")
 

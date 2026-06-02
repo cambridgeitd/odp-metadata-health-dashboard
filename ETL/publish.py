@@ -53,7 +53,8 @@ EXPORT_PATH = os.path.join(os.path.dirname(__file__), "data", "cambridge_odp_hea
 
 # Fill these via environment or hardcode for your repo
 HF_TOKEN = os.getenv("HF_TOKEN", "")
-HF_REPO = os.getenv("HF_REPO", "spark-dd4g/odp-metadata-health")
+HF_REPO = os.getenv("HF_DATASET_REPO") or os.getenv("HF_REPO", "alixepstein/odp-metadata-health")
+HF_OWNER = os.getenv("HF_OWNER", "alixepstein")
 
 # Debug: Log configuration status (without exposing full token)
 if HF_TOKEN:
@@ -298,6 +299,31 @@ def publish_to_hf(export_path: str, repo: str, token: str) -> None:
         raise
 
 
+def validate_hf_repo_owner(repo: str, expected_owner: str) -> None:
+    """
+    Ensure the configured dataset repo belongs to the expected owner.
+
+    Args:
+        repo: Hugging Face repo id in owner/name format
+        expected_owner: Expected owner/org name
+
+    Raises:
+        ValueError: If repo is malformed or owner does not match
+    """
+    if "/" not in repo:
+        raise ValueError(
+            f"HF repo '{repo}' is invalid. Expected format: owner/dataset-name"
+        )
+
+    actual_owner = repo.split("/", 1)[0].strip()
+    expected_owner = (expected_owner or "").strip()
+    if expected_owner and actual_owner.lower() != expected_owner.lower():
+        raise ValueError(
+            f"HF_REPO owner mismatch: expected '{expected_owner}', got '{actual_owner}'. "
+            "Set HF_DATASET_REPO to your repo or update HF_OWNER intentionally."
+        )
+
+
 # ────────────────────────────────────────────────────────────
 # MAIN EXECUTION
 # ────────────────────────────────────────────────────────────
@@ -327,6 +353,7 @@ def main():
         if HF_TOKEN and HF_REPO:
             logger.info("Step 2: Publishing to HuggingFace")
             logger.info("-" * 60)
+            validate_hf_repo_owner(HF_REPO, HF_OWNER)
             publish_to_hf(EXPORT_PATH, HF_REPO, HF_TOKEN)
         else:
             logger.warning("Step 2: Skipping HuggingFace upload")

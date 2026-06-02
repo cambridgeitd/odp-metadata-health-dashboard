@@ -56,6 +56,8 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_DATASET_REPO: ${{ vars.HF_DATASET_REPO || 'alixepstein/odp-metadata-health' }}
+          HF_OWNER: ${{ vars.HF_OWNER || 'alixepstein' }}
         run: |
           cd ETL
           CMD="python pipeline.py"
