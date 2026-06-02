@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 import plotly.express as px
 import plotly.graph_objects as go
 from typing import Optional
+from datasets import load_dataset
 
 st.set_page_config(
     page_title="Cambridge Open Data — Health Monitor",
@@ -173,25 +174,26 @@ def load_data() -> pd.DataFrame:
         db_path = os.path.join(os.path.dirname(__file__), '..', 'ETL', 'data', 'cambridge_metadata.db')
         db_path = os.path.normpath(db_path)
 
-        if not os.path.exists(db_path):
-            st.error(f"Database not found at: {db_path}")
-            st.info("Run the ETL pipeline first to populate the database.")
-            return pd.DataFrame()
+        if os.path.exists(db_path):
+            conn = sqlite3.connect(db_path)
+            query = """
+                SELECT d.*, e.evaluated_at, e.description_score, e.description_feedback,
+                       e.description_suggestion, e.tag_score, e.tag_feedback, e.tag_suggestion,
+                       e.description_exists, e.tags_count_score, e.license_exists,
+                       e.department_exists, e.category_exists, e.days_overdue,
+                       e.freshness_score, e.overall_health_score, e.overall_health_label
+                FROM ODP_datasets d
+                LEFT JOIN evaluations e ON d.dataset_id = e.dataset_id
+            """
+            df = pd.read_sql_query(query, conn)
+            conn.close()
+            print(f"Loaded {len(df)} rows from local database")
+        else:
+            # Spaces deployment uses the published dataset instead of local SQLite files.
+            hf_dataset = load_dataset("spark-dd4g/odp-metadata-health", split="train")
+            df = hf_dataset.to_pandas()
+            print(f"Loaded {len(df)} rows from Hugging Face dataset")
 
-        conn = sqlite3.connect(db_path)
-        query = """
-            SELECT d.*, e.evaluated_at, e.description_score, e.description_feedback,
-                   e.description_suggestion, e.tag_score, e.tag_feedback, e.tag_suggestion,
-                   e.description_exists, e.tags_count_score, e.license_exists,
-                   e.department_exists, e.category_exists, e.days_overdue,
-                   e.freshness_score, e.overall_health_score, e.overall_health_label
-            FROM ODP_datasets d
-            LEFT JOIN evaluations e ON d.dataset_id = e.dataset_id
-        """
-        df = pd.read_sql_query(query, conn)
-        conn.close()
-
-        print(f"Loaded {len(df)} rows from local database")
         print(f"Available columns: {df.columns.tolist()}")
 
         # Step 2: Column Renames
