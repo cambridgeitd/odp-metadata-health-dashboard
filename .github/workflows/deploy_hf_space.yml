@@ -28,7 +28,7 @@ jobs:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     env:
       HF_SPACE_REPO: ${{ vars.HF_SPACE_REPO || 'alixepstein/COCmetadatahealth' }}
-      HUGGING_FACE_TOKEN: ${{ secrets.HF_TOKEN }}
+      HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
 
     steps:
       - name: Checkout repository
